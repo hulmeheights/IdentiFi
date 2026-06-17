@@ -1,0 +1,7 @@
+{
+  "name": "sportsai-worldcup",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "SportsAI — World Cup 2026 live prediction dashboard (keyless feed + strength model)"
+}

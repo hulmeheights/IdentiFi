@@ -122,6 +122,20 @@
   footer{margin-top:56px;border-top:1px solid var(--line);padding:24px 0 50px}
   footer .mono{font-size:11px;color:var(--faint);line-height:1.7}
   .skel{color:var(--faint);font-size:13px;padding:30px 0;text-align:center}
+  .card{cursor:pointer}
+  .nav-links a.active{color:var(--text)}
+  .prelabel{font-family:'JetBrains Mono',monospace;font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--faint);margin-bottom:9px}
+  .ko-time{font-family:'JetBrains Mono',monospace;font-size:9.5px;color:var(--faint);letter-spacing:.04em}
+  .modal{position:fixed;inset:0;background:rgba(4,5,7,.74);backdrop-filter:blur(7px);display:none;align-items:center;justify-content:center;z-index:100;padding:20px;animation:fade .15s ease}
+  .modal.open{display:flex}
+  @keyframes fade{from{opacity:0}to{opacity:1}}
+  .modal-card{position:relative;max-width:680px;width:100%;background:linear-gradient(180deg,#13161d,#0f1116);border:1px solid var(--line);border-radius:18px;padding:28px;overflow:hidden;max-height:90vh;overflow-y:auto}
+  .modal-close{position:absolute;top:14px;right:18px;cursor:pointer;color:var(--muted);font-size:18px;line-height:1;z-index:3;border:1px solid var(--line);border-radius:7px;width:30px;height:30px;display:grid;place-items:center;background:var(--panel)}
+  .modal-close:hover{color:var(--text);border-color:#2d3440}
+  .modal-stats{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:20px;padding-top:18px;border-top:1px solid var(--line)}
+  .modal-stats .k{font-family:'JetBrains Mono',monospace;font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--faint)}
+  .modal-stats .v{font-size:17px;font-weight:700;margin-top:4px}
+  .modal-stats .v.green{color:var(--accent)}
 </style>
 </head>
 <body>
@@ -184,17 +198,38 @@
   </footer>
 </div>
 
+<div id="modal" class="modal" onclick="if(event.target===this)closeModal()"><div class="modal-card" id="modalCard"></div></div>
+
 <script>
 const FLAG={"Mexico":"🇲🇽","South Africa":"🇿🇦","South Korea":"🇰🇷","Korea Republic":"🇰🇷","Czech Republic":"🇨🇿","Czechia":"🇨🇿","Canada":"🇨🇦","Bosnia & Herzegovina":"🇧🇦","Bosnia and Herzegovina":"🇧🇦","Switzerland":"🇨🇭","Qatar":"🇶🇦","Brazil":"🇧🇷","Morocco":"🇲🇦","Scotland":"🏴󠁧󠁢󠁳󠁣󠁴󠁿","Haiti":"🇭🇹","United States":"🇺🇸","USA":"🇺🇸","Paraguay":"🇵🇾","Australia":"🇦🇺","Turkey":"🇹🇷","Türkiye":"🇹🇷","Germany":"🇩🇪","Ivory Coast":"🇨🇮","Côte d'Ivoire":"🇨🇮","Ecuador":"🇪🇨","Curacao":"🇨🇼","Curaçao":"🇨🇼","Netherlands":"🇳🇱","Sweden":"🇸🇪","Tunisia":"🇹🇳","Japan":"🇯🇵","Egypt":"🇪🇬","Iran":"🇮🇷","IR Iran":"🇮🇷","New Zealand":"🇳🇿","Belgium":"🇧🇪","Spain":"🇪🇸","Uruguay":"🇺🇾","Cape Verde":"🇨🇻","Cabo Verde":"🇨🇻","Saudi Arabia":"🇸🇦","France":"🇫🇷","Senegal":"🇸🇳","Norway":"🇳🇴","Iraq":"🇮🇶","Argentina":"🇦🇷","Algeria":"🇩🇿","Austria":"🇦🇹","Jordan":"🇯🇴","Portugal":"🇵🇹","Colombia":"🇨🇴","Uzbekistan":"🇺🇿","DR Congo":"🇨🇩","England":"🏴󠁧󠁢󠁥󠁮󠁧󠁿","Croatia":"🇭🇷","Ghana":"🇬🇭","Panama":"🇵🇦"};
 const fl=n=>FLAG[n]||"🏳️";
 let DATA=null, filter='all', sortConf=false, query='';
 const today=new Date().toISOString().slice(0,10);
 
+// Parse "19:00 UTC-4" + date into a real Date (renders in the viewer's local time).
+function kickoff(m){
+  if(!m.time||!m.date) return null;
+  const mt=m.time.match(/(\d{1,2}):(\d{2})\s*UTC([+-]\d{1,2})/);
+  if(!mt) return null;
+  const [,hh,mm,off]=mt, [Y,Mo,D]=m.date.split('-').map(Number);
+  return new Date(Date.UTC(Y,Mo-1,D,+hh,+mm) - parseInt(off)*3600000);
+}
+const fmtKO=m=>{const d=kickoff(m);return d?d.toLocaleString([],{weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):m.date;};
+const fmtTime=m=>{const d=kickoff(m);return d?d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}):'';};
+// Tick the match clock forward from the last server reading — no extra API calls.
+function liveMin(m){
+  if(m.minute==null||!DATA) return null;
+  let n=m.minute+Math.floor((Date.now()-DATA._fetchedAt)/60000);
+  return n>90?"90+":n;
+}
+const minSpan=m=>`<span class="live-min" data-mi="${m._id}">${liveMin(m)!=null?liveMin(m)+"'":''}</span>`;
+
 async function load(){
   try{
     const r=await fetch('/api/data',{cache:'no-store'}); DATA=await r.json();
-    document.getElementById('liveDot').innerHTML='<span class="d"></span> '+(DATA.realtime?'live · real-time':'live · '+new Date(DATA.updated).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}));
-    document.getElementById('rtNote').textContent=DATA.realtime?'Real-time in-play overlay is active.':'Add a free API-Football key in Vercel env vars to switch on second-by-second in-play scores.';
+    DATA._fetchedAt=Date.now(); DATA.matches.forEach((m,i)=>m._id=i);
+    document.getElementById('liveDot').innerHTML='<span class="d"></span> '+(DATA.realtime?'live scores · on':'live · '+new Date(DATA.updated).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}));
+    document.getElementById('rtNote').textContent=DATA.realtime?'Live scores stream in real-time; the win probabilities are our pre-match call, scored ✓/✗ at full time.':'Add a free API-Football key in Vercel env vars to switch on live in-play scores.';
     if(DATA.record&&DATA.record.pct!=null) document.getElementById('recBig').innerHTML=DATA.record.pct+'%<small>'+DATA.record.correct+'/'+DATA.record.played+' called correctly</small>';
     document.getElementById('footMono').innerHTML='IDENTIFI · SOURCE: '+DATA.source+' · UPDATED '+new Date(DATA.updated).toUTCString()+'<br>Predictions by the identifi engine — strength ratings, no bookmaker odds. Probabilistic, not guaranteed.';
     renderHero(); render(); renderGroups(); renderRace();
@@ -202,28 +237,29 @@ async function load(){
 }
 
 function renderHero(){
-  // pick featured: a live/in-play match if any, else next upcoming real match, else most recent
   const real=DATA.matches.filter(m=>!m.tbd);
   let m=real.find(x=>x.inPlay) || real.find(x=>!x.played&&x.date>=today) || [...real].reverse().find(x=>x.played) || real[0];
-  const p=m.probs||[0,0,0], pi=p.indexOf(Math.max(...p));
-  const live=m.inPlay?("LIVE "+(m.minute?m.minute+"'":'')):(m.played?'Full time':(m.date===today?'Today':'Upcoming'));
+  const p=m.probs||[0,0,0];
+  const liveBadge=m.inPlay?('LIVE '+minSpan(m)):(m.played?'Full time':fmtKO(m));
   const showScore=m.played||m.inPlay;
+  const prelabel=(m.inPlay||m.played)?'Pre-match win probability':'Win probability';
   document.getElementById('hero').innerHTML=`
     <div class="ghosttext">${(fl(m.home))} ${(fl(m.away))}</div>
-    <div class="badges"><span class="pill ${(m.inPlay||(m.date===today&&!m.played))?'live':''}">${live}</span>
+    <div class="badges"><span class="pill ${(m.inPlay||(m.date===today&&!m.played))?'live':''}">${liveBadge}</span>
       <span class="pill">${m.group?'Group '+m.group.replace('Group ',''):m.round||''}</span>
       <span class="pill">World Cup 2026</span>${m.ground?`<span class="pill">${m.ground}</span>`:''}</div>
     <div class="matchup"><span class="flag">${fl(m.home)}</span> ${m.home} <span class="vs">${showScore?m.score[0]+'–'+m.score[1]:'vs'}</span> ${m.away} <span class="flag">${fl(m.away)}</span></div>
+    <div class="prelabel" style="margin-top:18px">${prelabel}</div>
     <div class="probbar"><i style="width:${p[0]}%;background:var(--accent)"></i><i style="width:${p[1]}%;background:var(--draw)"></i><i style="width:${p[2]}%;background:var(--away)"></i></div>
     <div class="problabels"><span><span class="sq" style="background:var(--accent)"></span>${m.home} <b>${p[0]}%</b></span><span><span class="sq" style="background:var(--draw)"></span>Draw <b>${p[1]}%</b></span><span><span class="sq" style="background:var(--away)"></span>${m.away} <b>${p[2]}%</b></span></div>
     <div class="hero-foot"><div class="stat"><div class="k">AI Pick</div><div class="v green">${m.pick||'—'}</div></div>
       <div class="stat"><div class="k">Confidence</div><div class="v">${m.confidence||'—'}%</div></div>
-      <div class="stat"><div class="k">Status</div><div class="v">${live}</div></div>
-      ${m.played?`<div class="stat"><div class="k">Result</div><div class="v ${m.hit?'green':''}">${m.hit?'Called it':'Missed'}</div></div>`:''}</div>`;
+      <div class="stat"><div class="k">${m.played?'Result':'Kickoff'}</div><div class="v">${m.played?(m.hit?'Called it':'Missed'):fmtTime(m)||'—'}</div></div>
+      ${m.inPlay?`<div class="stat"><div class="k">Status</div><div class="v">LIVE ${minSpan(m)}</div></div>`:''}</div>`;
 }
 
 function card(m){
-  if(m.tbd) return `<div class="card"><div class="card-top"><span class="g">${m.round||''}</span><span>${m.date}</span></div>
+  if(m.tbd) return `<div class="card" style="cursor:default"><div class="card-top"><span class="g">${m.round||''}</span><span>${fmtKO(m)}</span></div>
     <div class="team"><span class="flag">🏳️</span>${m.home}</div><div class="team"><span class="flag">🏳️</span>${m.away}</div>
     <div class="tbd">Awaiting group results</div></div>`;
   const p=m.probs, pi=p.indexOf(Math.max(...p)), labs=['1','X','2'];
@@ -231,16 +267,43 @@ function card(m){
   const showScore=m.played||m.inPlay;
   const w0=showScore&&m.score[0]>m.score[1], w1=showScore&&m.score[1]>m.score[0];
   const sc=i=>showScore?`<span class="sc ${((i===0&&w0)||(i===1&&w1))?'win':''}">${m.score[i]}</span>`:'';
+  const topRight=m.inPlay?`<span style="color:#ff5a5f">● LIVE ${minSpan(m)}</span>`:(m.played?'FT':fmtKO(m));
   const foot=m.inPlay
-    ? `<span class="pick" style="color:#ff5a5f"><span class="dotg" style="background:#ff5a5f;animation:blink 1.4s infinite"></span>LIVE ${m.minute?m.minute+"'":''}</span><span class="conf">pick ${m.pick} · ${m.confidence}%</span>`
+    ? `<span class="pick" style="color:#ff5a5f"><span class="dotg" style="background:#ff5a5f;animation:blink 1.4s infinite"></span>${m.pick} (pre-match)</span><span class="conf">${m.confidence}%</span>`
     : m.played
     ? `<span class="final-tag ${m.hit?'hit':'miss'}">FT ${m.score[0]}–${m.score[1]} · ${m.hit?'✓ called':'✗ missed'}</span><span class="conf">${m.confidence}%</span>`
     : `<span class="pick"><span class="dotg"></span>${m.pick}</span><span class="conf">${m.confidence}% conf</span>`;
-  return `<div class="card"><div class="card-top"><span class="g">${m.group?m.group:m.round||''}</span><span>${m.inPlay?'· IN PLAY':m.date+(m.date===today?' · TODAY':'')}</span></div>
+  return `<div class="card" onclick="openMatch(${m._id})"><div class="card-top"><span class="g">${m.group?m.group:m.round||''}</span><span>${topRight}</span></div>
     <div class="team"><span class="flag">${fl(m.home)}</span>${m.home}${sc(0)}</div>
     <div class="team"><span class="flag">${fl(m.away)}</span>${m.away}${sc(1)}</div>
     <div class="pcols">${cols}</div><div class="card-foot">${foot}</div></div>`;
 }
+function openMatch(id){
+  const m=DATA.matches[id]; if(!m||m.tbd) return;
+  const p=m.probs||[0,0,0];
+  const showScore=m.played||m.inPlay;
+  const status=m.inPlay?('LIVE '+minSpan(m)):(m.played?(m.hit?'Called it ✓':'Missed ✗'):fmtTime(m)||'—');
+  const liveBadge=m.inPlay?('LIVE '+minSpan(m)):(m.played?'Full time':fmtKO(m));
+  document.getElementById('modalCard').innerHTML=`
+    <div class="modal-close" onclick="closeModal()">✕</div>
+    <div class="ghosttext">${fl(m.home)} ${fl(m.away)}</div>
+    <div class="badges"><span class="pill ${m.inPlay?'live':''}">${liveBadge}</span>
+      <span class="pill">${m.group?m.group:m.round||''}</span><span class="pill">World Cup 2026</span>${m.ground?`<span class="pill">${m.ground}</span>`:''}</div>
+    <div class="matchup"><span class="flag">${fl(m.home)}</span> ${m.home} <span class="vs">${showScore?m.score[0]+'–'+m.score[1]:'vs'}</span> ${m.away} <span class="flag">${fl(m.away)}</span></div>
+    <div class="prelabel" style="margin-top:18px">${(m.inPlay||m.played)?'Pre-match win probability':'Win probability'}</div>
+    <div class="probbar"><i style="width:${p[0]}%;background:var(--accent)"></i><i style="width:${p[1]}%;background:var(--draw)"></i><i style="width:${p[2]}%;background:var(--away)"></i></div>
+    <div class="problabels"><span><span class="sq" style="background:var(--accent)"></span>${m.home} <b>${p[0]}%</b></span><span><span class="sq" style="background:var(--draw)"></span>Draw <b>${p[1]}%</b></span><span><span class="sq" style="background:var(--away)"></span>${m.away} <b>${p[2]}%</b></span></div>
+    <div class="modal-stats">
+      <div><div class="k">AI Pick</div><div class="v green">${m.pick||'—'}</div></div>
+      <div><div class="k">Confidence</div><div class="v">${m.confidence||'—'}%</div></div>
+      <div><div class="k">${m.played?'Result':(m.inPlay?'Status':'Kickoff')}</div><div class="v">${status}</div></div>
+    </div>
+    ${m.played?`<div class="ko-time" style="margin-top:14px">Final score ${m.score[0]}–${m.score[1]}. Our pre-match pick was ${m.pick} — ${m.hit?'correct.':'wrong on this one.'}</div>`:''}`;
+  document.getElementById('modal').classList.add('open');
+  tick();
+}
+function closeModal(){document.getElementById('modal').classList.remove('open');}
+function tick(){ if(!DATA)return; document.querySelectorAll('.live-min').forEach(el=>{const m=DATA.matches[+el.dataset.mi];if(!m)return;const lm=liveMin(m);el.textContent=lm!=null?lm+"'":'';}); }
 function render(){
   let list=DATA.matches.filter(m=>{
     if(filter==='today'&&m.date!==today) return false;
@@ -281,7 +344,16 @@ document.getElementById('csv').onclick=()=>{
   a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download='worldcup-predictions.csv';a.click();
 };
 load();
-setInterval(load, 900000); // auto-refresh every 15 min (≈96 API calls/day, under the free 100/day cap)
+setInterval(load, 900000); // refresh data every 15 min (≈96 API calls/day, under the free 100/day cap)
+setInterval(tick, 1000);    // tick the live clock locally every second — no API cost
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closeModal();});
+// highlight the nav link for the section in view
+const navlinks=[...document.querySelectorAll('.nav-links a')];
+window.addEventListener('scroll',()=>{
+  let cur=navlinks[0];
+  for(const a of navlinks){const el=document.querySelector(a.getAttribute('href'));if(el&&el.getBoundingClientRect().top<=120)cur=a;}
+  navlinks.forEach(a=>a.classList.toggle('active',a===cur));
+},{passive:true});
 </script>
 </body>
 </html>

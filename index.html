@@ -242,12 +242,15 @@ async function load(){
     const r=await fetch('/api/data',{cache:'no-store'}); DATA=await r.json();
     DATA._fetchedAt=Date.now(); DATA.matches.forEach((m,i)=>m._id=i);
     document.getElementById('liveDot').innerHTML='<span class="d"></span> '+(DATA.realtime?'live scores · on':'live · '+new Date(DATA.updated).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}));
-    document.getElementById('rtNote').textContent=DATA.realtime?'Live scores stream in real-time; the win probabilities are our pre-match call, scored ✓/✗ at full time.':'Add a free API-Football key in Vercel env vars to switch on live in-play scores.';
+    document.getElementById('rtNote').textContent=DATA.realtime?'Live scores, clock, results and tables stream from a keyless real-time feed; win probabilities are our pre-match call, scored ✓/✗ at full time.':'Live feed unavailable right now — showing the latest confirmed results.';
     if(DATA.record&&DATA.record.pct!=null) document.getElementById('recBig').innerHTML=DATA.record.pct+'%<small>'+DATA.record.correct+'/'+DATA.record.played+' called correctly</small>';
     document.getElementById('footMono').innerHTML='IDENTIFI · SOURCE: '+DATA.source+' · UPDATED '+new Date(DATA.updated).toUTCString()+'<br>Predictions by the identifi engine — strength ratings, no bookmaker odds. Probabilistic, not guaranteed.';
     renderHero(); render(); renderResults(); renderGroups(); renderRace();
-  }catch(e){ document.getElementById('hero').innerHTML='<div class="skel">Couldn\'t reach the engine. Refresh in a moment.</div>'; }
+    scheduleNext();
+  }catch(e){ document.getElementById('hero').innerHTML='<div class="skel">Couldn\'t reach the engine. Refresh in a moment.</div>'; scheduleNext(); }
 }
+let _refreshTimer;
+function scheduleNext(){ clearTimeout(_refreshTimer); _refreshTimer=setTimeout(load, (DATA&&DATA.refreshMs)||900000); }
 
 function renderHero(){
   const real=DATA.matches.filter(m=>!m.tbd);
@@ -365,7 +368,6 @@ document.getElementById('csv').onclick=()=>{
   a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download='worldcup-predictions.csv';a.click();
 };
 load();
-setInterval(load, 900000); // refresh data every 15 min (≈96 API calls/day, under the free 100/day cap)
 setInterval(tick, 1000);    // tick the live clock locally every second — no API cost
 document.addEventListener('keydown',e=>{if(e.key==='Escape')closeModal();});
 // highlight the nav link for the section in view

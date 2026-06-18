@@ -106,7 +106,8 @@ async function fetchLiveOverlay() {
     }
     const fixtures = (j.response || []).map(f => ({
       home: f.teams.home.name, away: f.teams.away.name,
-      gh: f.goals.home ?? 0, ga: f.goals.away ?? 0, minute: f.fixture.status.elapsed
+      gh: f.goals.home ?? 0, ga: f.goals.away ?? 0,
+      minute: f.fixture.status.elapsed, status: f.fixture.status.short
     }));
     return { live: true, fixtures };
   } catch (e) { return { live: false, error: String(e) }; }
@@ -144,7 +145,7 @@ export default async function handler(req, res) {
       for (const lf of overlay.fixtures) {
         const m = matches.find(x => !x.played && !x.tbd &&
           lkey(x.home) === lkey(lf.home) && lkey(x.away) === lkey(lf.away));
-        if (m) { m.inPlay = true; m.score = [lf.gh, lf.ga]; m.minute = lf.minute; inPlayCount++; }
+        if (m) { m.inPlay = true; m.score = [lf.gh, lf.ga]; m.minute = lf.minute; m.status = lf.status; inPlayCount++; }
       }
     }
 

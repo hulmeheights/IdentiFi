@@ -142,7 +142,7 @@
 <nav><div class="wrap nav-in">
   <div class="logo"><span class="dot">i</span> identifi</div>
   <div class="nav-links">
-    <a href="#board">Predictions</a><a href="#groups">Groups</a><a href="#race">Title Race</a><a href="#method">Methodology</a>
+    <a href="#board">Predictions</a><a href="#results">Results</a><a href="#groups">Groups</a><a href="#race">Title Race</a><a href="#method">Methodology</a>
   </div>
   <div class="nav-right">
     <span class="live-dot" id="liveDot"><span class="d"></span> connecting…</span>
@@ -181,6 +181,12 @@
     <div id="boardOut"><div class="skel">…</div></div>
   </section>
 
+  <section class="sec" id="results">
+    <div class="sec-head"><div><div class="eyebrow">Settled · scored against our call</div><h2>Results</h2>
+    <p>Every completed match, newest first, with the final score and whether our pre-match pick landed. Updates as games finish.</p></div></div>
+    <div id="resultsOut"></div>
+  </section>
+
   <section class="sec" id="groups">
     <div class="sec-head"><div><div class="eyebrow">Live tables</div><h2>Group Standings</h2>
     <p>Computed live from results. Top two qualify; eight best third-placed teams also reach the Round of 32.</p></div></div>
@@ -217,12 +223,19 @@ function kickoff(m){
 const fmtKO=m=>{const d=kickoff(m);return d?d.toLocaleString([],{weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):m.date;};
 const fmtTime=m=>{const d=kickoff(m);return d?d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}):'';};
 // Tick the match clock forward from the last server reading — no extra API calls.
-function liveMin(m){
-  if(m.minute==null||!DATA) return null;
+// Status-aware: shows HT during the break instead of ticking through it.
+function liveLabel(m){
+  if(!DATA||m.minute==null) return '';
+  const s=m.status;
+  if(s==='HT') return 'HT';
+  if(s==='FT'||s==='AET'||s==='PEN') return 'FT';
   let n=m.minute+Math.floor((Date.now()-DATA._fetchedAt)/60000);
-  return n>90?"90+":n;
+  if(s==='1H'&&n>45) return "45+'";   // first-half stoppage / half-time gap
+  if(n>90) return "90+'";
+  return n+"'";
 }
-const minSpan=m=>`<span class="live-min" data-mi="${m._id}">${liveMin(m)!=null?liveMin(m)+"'":''}</span>`;
+const minSpan=m=>`<span class="live-min" data-mi="${m._id}">${liveLabel(m)}</span>`;
+const liveBadge=m=>m.inPlay?(m.status==='HT'?'HALF-TIME':('LIVE '+minSpan(m))):(m.played?'Full time':fmtKO(m));
 
 async function load(){
   try{
@@ -232,7 +245,7 @@ async function load(){
     document.getElementById('rtNote').textContent=DATA.realtime?'Live scores stream in real-time; the win probabilities are our pre-match call, scored ✓/✗ at full time.':'Add a free API-Football key in Vercel env vars to switch on live in-play scores.';
     if(DATA.record&&DATA.record.pct!=null) document.getElementById('recBig').innerHTML=DATA.record.pct+'%<small>'+DATA.record.correct+'/'+DATA.record.played+' called correctly</small>';
     document.getElementById('footMono').innerHTML='IDENTIFI · SOURCE: '+DATA.source+' · UPDATED '+new Date(DATA.updated).toUTCString()+'<br>Predictions by the identifi engine — strength ratings, no bookmaker odds. Probabilistic, not guaranteed.';
-    renderHero(); render(); renderGroups(); renderRace();
+    renderHero(); render(); renderResults(); renderGroups(); renderRace();
   }catch(e){ document.getElementById('hero').innerHTML='<div class="skel">Couldn\'t reach the engine. Refresh in a moment.</div>'; }
 }
 
@@ -240,12 +253,12 @@ function renderHero(){
   const real=DATA.matches.filter(m=>!m.tbd);
   let m=real.find(x=>x.inPlay) || real.find(x=>!x.played&&x.date>=today) || [...real].reverse().find(x=>x.played) || real[0];
   const p=m.probs||[0,0,0];
-  const liveBadge=m.inPlay?('LIVE '+minSpan(m)):(m.played?'Full time':fmtKO(m));
+  const liveB=liveBadge(m);
   const showScore=m.played||m.inPlay;
   const prelabel=(m.inPlay||m.played)?'Pre-match win probability':'Win probability';
   document.getElementById('hero').innerHTML=`
     <div class="ghosttext">${(fl(m.home))} ${(fl(m.away))}</div>
-    <div class="badges"><span class="pill ${(m.inPlay||(m.date===today&&!m.played))?'live':''}">${liveBadge}</span>
+    <div class="badges"><span class="pill ${(m.inPlay||(m.date===today&&!m.played))?'live':''}">${liveB}</span>
       <span class="pill">${m.group?'Group '+m.group.replace('Group ',''):m.round||''}</span>
       <span class="pill">World Cup 2026</span>${m.ground?`<span class="pill">${m.ground}</span>`:''}</div>
     <div class="matchup"><span class="flag">${fl(m.home)}</span> ${m.home} <span class="vs">${showScore?m.score[0]+'–'+m.score[1]:'vs'}</span> ${m.away} <span class="flag">${fl(m.away)}</span></div>
@@ -255,7 +268,7 @@ function renderHero(){
     <div class="hero-foot"><div class="stat"><div class="k">AI Pick</div><div class="v green">${m.pick||'—'}</div></div>
       <div class="stat"><div class="k">Confidence</div><div class="v">${m.confidence||'—'}%</div></div>
       <div class="stat"><div class="k">${m.played?'Result':'Kickoff'}</div><div class="v">${m.played?(m.hit?'Called it':'Missed'):fmtTime(m)||'—'}</div></div>
-      ${m.inPlay?`<div class="stat"><div class="k">Status</div><div class="v">LIVE ${minSpan(m)}</div></div>`:''}</div>`;
+      ${m.inPlay?`<div class="stat"><div class="k">Status</div><div class="v">${m.status==='HT'?'Half-time':('LIVE '+minSpan(m))}</div></div>`:''}</div>`;
 }
 
 function card(m){
@@ -267,7 +280,7 @@ function card(m){
   const showScore=m.played||m.inPlay;
   const w0=showScore&&m.score[0]>m.score[1], w1=showScore&&m.score[1]>m.score[0];
   const sc=i=>showScore?`<span class="sc ${((i===0&&w0)||(i===1&&w1))?'win':''}">${m.score[i]}</span>`:'';
-  const topRight=m.inPlay?`<span style="color:#ff5a5f">● LIVE ${minSpan(m)}</span>`:(m.played?'FT':fmtKO(m));
+  const topRight=m.inPlay?`<span style="color:#ff5a5f">● ${m.status==='HT'?'HT':minSpan(m)}</span>`:(m.played?'FT':fmtKO(m));
   const foot=m.inPlay
     ? `<span class="pick" style="color:#ff5a5f"><span class="dotg" style="background:#ff5a5f;animation:blink 1.4s infinite"></span>${m.pick} (pre-match)</span><span class="conf">${m.confidence}%</span>`
     : m.played
@@ -282,12 +295,12 @@ function openMatch(id){
   const m=DATA.matches[id]; if(!m||m.tbd) return;
   const p=m.probs||[0,0,0];
   const showScore=m.played||m.inPlay;
-  const status=m.inPlay?('LIVE '+minSpan(m)):(m.played?(m.hit?'Called it ✓':'Missed ✗'):fmtTime(m)||'—');
-  const liveBadge=m.inPlay?('LIVE '+minSpan(m)):(m.played?'Full time':fmtKO(m));
+  const status=m.inPlay?(m.status==='HT'?'Half-time':('LIVE '+minSpan(m))):(m.played?(m.hit?'Called it ✓':'Missed ✗'):fmtTime(m)||'—');
+  const lb=liveBadge(m);
   document.getElementById('modalCard').innerHTML=`
     <div class="modal-close" onclick="closeModal()">✕</div>
     <div class="ghosttext">${fl(m.home)} ${fl(m.away)}</div>
-    <div class="badges"><span class="pill ${m.inPlay?'live':''}">${liveBadge}</span>
+    <div class="badges"><span class="pill ${m.inPlay?'live':''}">${lb}</span>
       <span class="pill">${m.group?m.group:m.round||''}</span><span class="pill">World Cup 2026</span>${m.ground?`<span class="pill">${m.ground}</span>`:''}</div>
     <div class="matchup"><span class="flag">${fl(m.home)}</span> ${m.home} <span class="vs">${showScore?m.score[0]+'–'+m.score[1]:'vs'}</span> ${m.away} <span class="flag">${fl(m.away)}</span></div>
     <div class="prelabel" style="margin-top:18px">${(m.inPlay||m.played)?'Pre-match win probability':'Win probability'}</div>
@@ -303,7 +316,15 @@ function openMatch(id){
   tick();
 }
 function closeModal(){document.getElementById('modal').classList.remove('open');}
-function tick(){ if(!DATA)return; document.querySelectorAll('.live-min').forEach(el=>{const m=DATA.matches[+el.dataset.mi];if(!m)return;const lm=liveMin(m);el.textContent=lm!=null?lm+"'":'';}); }
+function tick(){ if(!DATA)return; document.querySelectorAll('.live-min').forEach(el=>{const m=DATA.matches[+el.dataset.mi];if(!m)return;el.textContent=liveLabel(m);}); }
+function renderResults(){
+  const done=DATA.matches.filter(m=>m.played).sort((a,b)=>b.date.localeCompare(a.date));
+  const o=document.getElementById('resultsOut');
+  if(!done.length){o.innerHTML='<div class="skel">No completed matches yet.</div>';return;}
+  const rec=DATA.record||{};
+  const head=rec.pct!=null?`<div class="prelabel" style="margin-bottom:14px">Track record · ${rec.correct}/${rec.played} called correctly · ${rec.pct}%</div>`:'';
+  o.innerHTML=head+`<div class="grid">${done.map(card).join('')}</div>`;
+}
 function render(){
   let list=DATA.matches.filter(m=>{
     if(filter==='today'&&m.date!==today) return false;

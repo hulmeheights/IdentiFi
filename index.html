@@ -238,6 +238,7 @@ function kickoff(m){
 const fmtKO=m=>{const d=kickoff(m);return d?d.toLocaleString([],{weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):m.date;};
 // The viewer's local calendar day for a match (from kickoff), not the stadium's date.
 const localDay=m=>{const d=kickoff(m);return d?d.toLocaleDateString('en-CA'):m.date;};
+const koMs=m=>{const d=kickoff(m);return d?d.getTime():0;};
 // A match's true state. 'ended' = kicked off long enough ago to be over, but the
 // free results feed hasn't posted the final score yet (so not 'played' with ✓/✗ yet).
 function phase(m){
@@ -286,7 +287,10 @@ function scheduleNext(){ clearTimeout(_refreshTimer); _refreshTimer=setTimeout(l
 
 function renderHero(){
   const real=DATA.matches.filter(m=>!m.tbd);
-  let m=real.find(x=>x.inPlay) || real.find(x=>!x.played&&(kickoff(x)?kickoff(x).getTime()>=Date.now():x.date>=today)) || [...real].reverse().find(x=>x.played) || real[0];
+  const live=real.find(m=>phase(m)==='live');
+  const next=real.filter(m=>phase(m)==='upcoming').sort((a,b)=>koMs(a)-koMs(b))[0];      // soonest kickoff
+  const recent=real.filter(m=>m.played||phase(m)==='ended').sort((a,b)=>koMs(b)-koMs(a))[0]; // most recent
+  let m=live || next || recent || real[0];
   const p=m.probs||[0,0,0];
   const liveB=liveBadge(m);
   const showScore=m.played||m.inPlay;
@@ -407,7 +411,7 @@ function render(){
     out.innerHTML=`<div class="grid">${list.map(card).join('')}</div>`;
   }else{
     const days=[...new Set(list.map(localDay))].sort();
-    out.innerHTML=days.map(d=>{const dm=list.filter(m=>localDay(m)===d);
+    out.innerHTML=days.map(d=>{const dm=list.filter(m=>localDay(m)===d).sort((a,b)=>koMs(a)-koMs(b));
       return `<div class="daygroup"><div class="daylabel">${d} · ${dm.length} ${dm.length===1?'match':'matches'}</div><div class="grid">${dm.map(card).join('')}</div></div>`;}).join('');
   }
 }

@@ -37,6 +37,14 @@ const LIVE_ALIAS = { usa:"unitedstates", korearepublic:"southkorea", czechia:"cz
   congodr:"drcongo", drcongo:"drcongo", democraticrepublicofthecongo:"drcongo" };
 const lkey = s => { const k = key(s); return LIVE_ALIAS[k] || k; };
 
+// Fetch with a hard deadline — a slow third-party source must never hang the whole function.
+async function timedFetch(url, opts = {}, ms = 3500) {
+  const c = new AbortController();
+  const t = setTimeout(() => c.abort(), ms);
+  try { return await fetch(url, { ...opts, signal: c.signal }); }
+  finally { clearTimeout(t); }
+}
+
 function predict(home, away) {
   let rh = rating(home), ra = rating(away);
   if (HOSTS.has(norm(home))) rh += 25;
@@ -82,7 +90,7 @@ function titleOdds(teams) {
 // ---- LIVE source 1: worldcup26.ir (keyless) ----
 async function fetchWC26() {
   try {
-    const r = await fetch(WC26, { headers: { accept: "application/json" } });
+    const r = await timedFetch(WC26, { headers: { accept: "application/json" } }, 3000);
     if (!r.ok) return null;
     const j = await r.json();
     return Array.isArray(j.games) ? j.games : null;
@@ -104,12 +112,8 @@ async function fetchAPIFootball() {
   const apiKey = process.env.APIFOOTBALL_KEY;
   if (!apiKey) return null;
   try {
-    let r = await fetch("https://v3.football.api-sports.io/fixtures?live=all&league=1", { headers: { "x-apisports-key": apiKey } });
-    let j = await r.json();
-    if (!j.response || !j.response.length) {
-      r = await fetch("https://v3.football.api-sports.io/fixtures?live=all", { headers: { "x-apisports-key": apiKey } });
-      j = await r.json();
-    }
+    const r = await timedFetch("https://v3.football.api-sports.io/fixtures?live=all&league=1", { headers: { "x-apisports-key": apiKey } }, 2500);
+    const j = await r.json();
     return (j.response || []).map(f => ({
       home: f.teams.home.name, away: f.teams.away.name,
       gh: f.goals.home ?? 0, ga: f.goals.away ?? 0,
@@ -120,8 +124,10 @@ async function fetchAPIFootball() {
 
 export default async function handler(req, res) {
   try {
-    const r = await fetch(FEED, { headers: { "cache-control": "no-cache" } });
-    const raw = (await r.json()).matches || [];
+    // Feed (canonical schedule/results) and the keyless live source run concurrently.
+    const feedPromise = timedFetch(FEED, { headers: { "cache-control": "no-cache" } }, 4000).then(r => r.json());
+    const wc26Promise = fetchWC26();
+    const raw = (await feedPromise).matches || [];
 
     const matches = raw.map(m => {
       const ft = m.score && m.score.ft;
@@ -142,7 +148,7 @@ export default async function handler(req, res) {
     let source = "openfootball (keyless)", realtime = false, inPlayCount = 0, refreshMs = 900000;
 
     // LIVE 1: worldcup26.ir — keyless, poll fast
-    const wc26 = await fetchWC26();
+    const wc26 = await wc26Promise;
     if (wc26) {
       source = "openfootball + worldcup26.ir (keyless live)"; realtime = true; refreshMs = 60000;
       for (const g of wc26) {

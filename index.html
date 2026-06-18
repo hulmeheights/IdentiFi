@@ -225,7 +225,7 @@ let DATA=null, filter='all', sortConf=false, query='';
 let STATS={};  // post-match team stats keyed by normalised home__away
 const SALIAS={usa:'unitedstates',korearepublic:'southkorea',czechia:'czechrepublic',iriran:'iran',turkiye:'turkey',cotedivoire:'ivorycoast',caboverde:'capeverde',congodr:'drcongo',drcongo:'drcongo'};
 const skey=s=>{const k=(s||'').toLowerCase().normalize('NFD').replace(/[^a-z]/g,'');return SALIAS[k]||k;};
-const today=new Date().toISOString().slice(0,10);
+const today=new Date().toLocaleDateString('en-CA');  // YYYY-MM-DD in the VIEWER's local zone
 
 // Parse "19:00 UTC-4" + date into a real Date (renders in the viewer's local time).
 function kickoff(m){
@@ -236,6 +236,17 @@ function kickoff(m){
   return new Date(Date.UTC(Y,Mo-1,D,+hh,+mm) - parseInt(off)*3600000);
 }
 const fmtKO=m=>{const d=kickoff(m);return d?d.toLocaleString([],{weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):m.date;};
+// The viewer's local calendar day for a match (from kickoff), not the stadium's date.
+const localDay=m=>{const d=kickoff(m);return d?d.toLocaleDateString('en-CA'):m.date;};
+// A match's true state. 'ended' = kicked off long enough ago to be over, but the
+// free results feed hasn't posted the final score yet (so not 'played' with ✓/✗ yet).
+function phase(m){
+  if(m.played) return 'played';
+  if(m.inPlay) return 'live';
+  const ko=kickoff(m);
+  if(ko && Date.now()-ko.getTime() > 120*60000) return 'ended';
+  return 'upcoming';
+}
 const fmtTime=m=>{const d=kickoff(m);return d?d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}):'';};
 // Tick the match clock forward from the last server reading — no extra API calls.
 // Status-aware: shows HT during the break instead of ticking through it.
@@ -265,8 +276,9 @@ async function load(){
     document.getElementById('footMono').innerHTML='IDENTIFI · SOURCE: '+DATA.source+' · UPDATED '+new Date(DATA.updated).toUTCString()+'<br>Predictions by the identifi engine — strength ratings, no bookmaker odds. Probabilistic, not guaranteed.';
     renderHero(); render(); renderResults(); renderGroups(); renderRace();
     scheduleNext();
-    // Post-match team stats load separately (cached hard) so they never block the board.
-    fetch('/api/stats',{cache:'no-store'}).then(r=>r.json()).then(j=>{STATS=j.stats||{};}).catch(()=>{});
+    // Post-match team stats are OFF — WC2026 isn't on the free API-Football plan (seasons 2022–2024 only).
+    // To switch back on with a Pro key (or another 2026-capable source), uncomment the line below:
+    // fetch('/api/stats',{cache:'no-store'}).then(r=>r.json()).then(j=>{STATS=j.stats||{};}).catch(()=>{});
   }catch(e){ document.getElementById('hero').innerHTML='<div class="skel">Couldn\'t reach the engine. Refresh in a moment.</div>'; scheduleNext(); }
 }
 let _refreshTimer;
@@ -274,7 +286,7 @@ function scheduleNext(){ clearTimeout(_refreshTimer); _refreshTimer=setTimeout(l
 
 function renderHero(){
   const real=DATA.matches.filter(m=>!m.tbd);
-  let m=real.find(x=>x.inPlay) || real.find(x=>!x.played&&x.date>=today) || [...real].reverse().find(x=>x.played) || real[0];
+  let m=real.find(x=>x.inPlay) || real.find(x=>!x.played&&(kickoff(x)?kickoff(x).getTime()>=Date.now():x.date>=today)) || [...real].reverse().find(x=>x.played) || real[0];
   const p=m.probs||[0,0,0];
   const liveB=liveBadge(m);
   const showScore=m.played||m.inPlay;
@@ -303,11 +315,17 @@ function card(m){
   const showScore=m.played||m.inPlay;
   const w0=showScore&&m.score[0]>m.score[1], w1=showScore&&m.score[1]>m.score[0];
   const sc=i=>showScore?`<span class="sc ${((i===0&&w0)||(i===1&&w1))?'win':''}">${m.score[i]}</span>`:'';
-  const topRight=m.inPlay?`<span style="color:#ff5a5f">● ${m.status==='HT'?'HT':minSpan(m)}</span>`:(m.played?'FT':fmtKO(m));
-  const foot=m.inPlay
+  const ph=phase(m);
+  const topRight=ph==='live'?`<span style="color:#ff5a5f">● ${m.status==='HT'?'HT':minSpan(m)}</span>`
+    :ph==='played'?'FT'
+    :ph==='ended'?`<span style="color:var(--muted)">FT · result pending</span>`
+    :fmtKO(m);
+  const foot=ph==='live'
     ? `<span class="pick" style="color:#ff5a5f"><span class="dotg" style="background:#ff5a5f;animation:blink 1.4s infinite"></span>${m.pick} (pre-match)</span><span class="conf">${m.confidence}%</span>`
-    : m.played
+    : ph==='played'
     ? `<span class="final-tag ${m.hit?'hit':'miss'}">FT ${m.score[0]}–${m.score[1]} · ${m.hit?'✓ called':'✗ missed'}</span><span class="conf">${m.confidence}%</span>`
+    : ph==='ended'
+    ? `<span class="pick"><span class="dotg"></span>${m.pick}</span><span class="conf">awaiting result</span>`
     : `<span class="pick"><span class="dotg"></span>${m.pick}</span><span class="conf">${m.confidence}% conf</span>`;
   return `<div class="card" onclick="openMatch(${m._id})"><div class="card-top"><span class="g">${m.group?m.group:m.round||''}</span><span>${topRight}</span></div>
     <div class="team"><span class="flag">${fl(m.home)}</span>${m.home}${sc(0)}</div>
@@ -352,7 +370,7 @@ function trow(label,h,a,positive=true){
 function statsPanel(m){
   const s=STATS[skey(m.home)+'__'+skey(m.away)];
   const head=`<div class="th"><span class="fl">${fl(m.home)}</span> Team stats <span class="fl">${fl(m.away)}</span></div>`;
-  if(!s||(!s.home&&!s.away)) return `<div class="tstats">${head}<div class="tnote">Match stats aren’t available for this fixture yet.</div></div>`;
+  if(!s||(!s.home&&!s.away)) return '';
   const h=s.home||{}, a=s.away||{};
   const rows=[
     trow('Shots',h.shots,a.shots), trow('Shots on target',h.sot,a.sot),
@@ -375,8 +393,9 @@ function renderResults(){
 }
 function render(){
   let list=DATA.matches.filter(m=>{
-    if(filter==='today'&&m.date!==today) return false;
-    if(filter==='upcoming'&&(m.played||m.date<today)) return false;
+    const day=localDay(m);
+    if(filter==='today'&&day!==today) return false;
+    if(filter==='upcoming'&&phase(m)!=='upcoming') return false;
     if(filter==='played'&&!m.played) return false;
     if(query){const q=query.toLowerCase();if(!((m.home+m.away).toLowerCase().includes(q)))return false;}
     return true;
@@ -387,8 +406,8 @@ function render(){
     list=[...list].sort((a,b)=>(b.confidence||0)-(a.confidence||0));
     out.innerHTML=`<div class="grid">${list.map(card).join('')}</div>`;
   }else{
-    const days=[...new Set(list.map(m=>m.date))].sort();
-    out.innerHTML=days.map(d=>{const dm=list.filter(m=>m.date===d);
+    const days=[...new Set(list.map(localDay))].sort();
+    out.innerHTML=days.map(d=>{const dm=list.filter(m=>localDay(m)===d);
       return `<div class="daygroup"><div class="daylabel">${d} · ${dm.length} ${dm.length===1?'match':'matches'}</div><div class="grid">${dm.map(card).join('')}</div></div>`;}).join('');
   }
 }

@@ -136,6 +136,18 @@
   .modal-stats .k{font-family:'JetBrains Mono',monospace;font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--faint)}
   .modal-stats .v{font-size:17px;font-weight:700;margin-top:4px}
   .modal-stats .v.green{color:var(--accent)}
+  .tstats{margin-top:22px;padding-top:18px;border-top:1px solid var(--line)}
+  .tstats .th{display:flex;align-items:center;justify-content:space-between;font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--faint);margin-bottom:14px}
+  .tstats .th .fl{font-size:18px}
+  .trow{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:14px;padding:7px 0}
+  .trow .lab{text-align:center;font-size:11px;color:var(--muted);font-family:'JetBrains Mono',monospace;letter-spacing:.04em;white-space:nowrap}
+  .trow .hv,.trow .av{font-size:14px;font-weight:600;font-variant-numeric:tabular-nums}
+  .trow .hv{text-align:right}.trow .av{text-align:left}
+  .trow .hv.lead,.trow .av.lead{color:var(--accent)}
+  .tbar{grid-column:1/-1;height:4px;border-radius:3px;display:flex;overflow:hidden;background:var(--panel2);margin-top:2px}
+  .tbar i{display:block;height:100%}
+  .tbar .h{background:var(--accent)}.tbar .a{background:var(--away)}
+  .tnote{color:var(--faint);font-size:12px;font-family:'JetBrains Mono',monospace;text-align:center;padding:14px 0}
 </style>
 </head>
 <body>
@@ -183,7 +195,7 @@
 
   <section class="sec" id="results">
     <div class="sec-head"><div><div class="eyebrow">Settled · scored against our call</div><h2>Results</h2>
-    <p>Every completed match, newest first, with the final score and whether our pre-match pick landed. Updates as games finish.</p></div></div>
+    <p>Every completed match, newest first, with the final score and whether our pre-match pick landed. Tap any match for the full team-stats breakdown.</p></div></div>
     <div id="resultsOut"></div>
   </section>
 
@@ -210,6 +222,9 @@
 const FLAG={"Mexico":"🇲🇽","South Africa":"🇿🇦","South Korea":"🇰🇷","Korea Republic":"🇰🇷","Czech Republic":"🇨🇿","Czechia":"🇨🇿","Canada":"🇨🇦","Bosnia & Herzegovina":"🇧🇦","Bosnia and Herzegovina":"🇧🇦","Switzerland":"🇨🇭","Qatar":"🇶🇦","Brazil":"🇧🇷","Morocco":"🇲🇦","Scotland":"🏴󠁧󠁢󠁳󠁣󠁴󠁿","Haiti":"🇭🇹","United States":"🇺🇸","USA":"🇺🇸","Paraguay":"🇵🇾","Australia":"🇦🇺","Turkey":"🇹🇷","Türkiye":"🇹🇷","Germany":"🇩🇪","Ivory Coast":"🇨🇮","Côte d'Ivoire":"🇨🇮","Ecuador":"🇪🇨","Curacao":"🇨🇼","Curaçao":"🇨🇼","Netherlands":"🇳🇱","Sweden":"🇸🇪","Tunisia":"🇹🇳","Japan":"🇯🇵","Egypt":"🇪🇬","Iran":"🇮🇷","IR Iran":"🇮🇷","New Zealand":"🇳🇿","Belgium":"🇧🇪","Spain":"🇪🇸","Uruguay":"🇺🇾","Cape Verde":"🇨🇻","Cabo Verde":"🇨🇻","Saudi Arabia":"🇸🇦","France":"🇫🇷","Senegal":"🇸🇳","Norway":"🇳🇴","Iraq":"🇮🇶","Argentina":"🇦🇷","Algeria":"🇩🇿","Austria":"🇦🇹","Jordan":"🇯🇴","Portugal":"🇵🇹","Colombia":"🇨🇴","Uzbekistan":"🇺🇿","DR Congo":"🇨🇩","England":"🏴󠁧󠁢󠁥󠁮󠁧󠁿","Croatia":"🇭🇷","Ghana":"🇬🇭","Panama":"🇵🇦"};
 const fl=n=>FLAG[n]||"🏳️";
 let DATA=null, filter='all', sortConf=false, query='';
+let STATS={};  // post-match team stats keyed by normalised home__away
+const SALIAS={usa:'unitedstates',korearepublic:'southkorea',czechia:'czechrepublic',iriran:'iran',turkiye:'turkey',cotedivoire:'ivorycoast',caboverde:'capeverde',congodr:'drcongo',drcongo:'drcongo'};
+const skey=s=>{const k=(s||'').toLowerCase().normalize('NFD').replace(/[^a-z]/g,'');return SALIAS[k]||k;};
 const today=new Date().toISOString().slice(0,10);
 
 // Parse "19:00 UTC-4" + date into a real Date (renders in the viewer's local time).
@@ -228,8 +243,11 @@ function liveLabel(m){
   if(!DATA||m.minute==null) return '';
   const s=m.status;
   if(s==='HT') return 'HT';
-  if(s==='FT'||s==='AET'||s==='PEN') return 'FT';
-  let n=m.minute+Math.floor((Date.now()-DATA._fetchedAt)/60000);
+  if(m.played||s==='FT'||s==='AET'||s==='PEN') return 'FT';
+  // Anchor to when the SERVER read the minute (DATA.updated), not when the browser
+  // fetched it — otherwise a cache-stale response makes the clock look frozen.
+  const base=DATA.updated?new Date(DATA.updated).getTime():DATA._fetchedAt;
+  let n=m.minute+Math.max(0,Math.floor((Date.now()-base)/60000));
   if(s==='1H'&&n>45) return "45+'";   // first-half stoppage / half-time gap
   if(n>90) return "90+'";
   return n+"'";
@@ -247,6 +265,8 @@ async function load(){
     document.getElementById('footMono').innerHTML='IDENTIFI · SOURCE: '+DATA.source+' · UPDATED '+new Date(DATA.updated).toUTCString()+'<br>Predictions by the identifi engine — strength ratings, no bookmaker odds. Probabilistic, not guaranteed.';
     renderHero(); render(); renderResults(); renderGroups(); renderRace();
     scheduleNext();
+    // Post-match team stats load separately (cached hard) so they never block the board.
+    fetch('/api/stats',{cache:'no-store'}).then(r=>r.json()).then(j=>{STATS=j.stats||{};}).catch(()=>{});
   }catch(e){ document.getElementById('hero').innerHTML='<div class="skel">Couldn\'t reach the engine. Refresh in a moment.</div>'; scheduleNext(); }
 }
 let _refreshTimer;
@@ -314,9 +334,34 @@ function openMatch(id){
       <div><div class="k">Confidence</div><div class="v">${m.confidence||'—'}%</div></div>
       <div><div class="k">${m.played?'Result':(m.inPlay?'Status':'Kickoff')}</div><div class="v">${status}</div></div>
     </div>
-    ${m.played?`<div class="ko-time" style="margin-top:14px">Final score ${m.score[0]}–${m.score[1]}. Our pre-match pick was ${m.pick} — ${m.hit?'correct.':'wrong on this one.'}</div>`:''}`;
+    ${m.played?`<div class="ko-time" style="margin-top:14px">Final score ${m.score[0]}–${m.score[1]}. Our pre-match pick was ${m.pick} — ${m.hit?'correct.':'wrong on this one.'}</div>`:''}
+    ${m.played?statsPanel(m):''}`;
   document.getElementById('modal').classList.add('open');
   tick();
+}
+const statNum=v=>{ if(v==null) return null; const n=parseFloat(String(v).replace('%','')); return isNaN(n)?null:n; };
+function trow(label,h,a,positive=true){
+  const hn=statNum(h), an=statNum(a);
+  let hLead=false, aLead=false, bar='';
+  if(positive&&hn!=null&&an!=null){
+    hLead=hn>an; aLead=an>hn;
+    if((hn+an)>0){const hp=Math.round(hn/(hn+an)*100);bar=`<div class="tbar"><i class="h" style="width:${hp}%"></i><i class="a" style="width:${100-hp}%"></i></div>`;}
+  }
+  return `<div class="trow"><span class="hv ${hLead?'lead':''}">${h==null?'–':h}</span><span class="lab">${label}</span><span class="av ${aLead?'lead':''}">${a==null?'–':a}</span>${bar}</div>`;
+}
+function statsPanel(m){
+  const s=STATS[skey(m.home)+'__'+skey(m.away)];
+  const head=`<div class="th"><span class="fl">${fl(m.home)}</span> Team stats <span class="fl">${fl(m.away)}</span></div>`;
+  if(!s||(!s.home&&!s.away)) return `<div class="tstats">${head}<div class="tnote">Match stats aren’t available for this fixture yet.</div></div>`;
+  const h=s.home||{}, a=s.away||{};
+  const rows=[
+    trow('Shots',h.shots,a.shots), trow('Shots on target',h.sot,a.sot),
+    trow('Possession',h.poss,a.poss), trow('Passes',h.passes,a.passes),
+    trow('Pass accuracy',h.passAcc,a.passAcc), trow('Corners',h.corners,a.corners),
+    trow('Fouls',h.fouls,a.fouls,false), trow('Offsides',h.offsides,a.offsides,false),
+    trow('Yellow cards',h.yellow,a.yellow,false), trow('Red cards',h.red,a.red,false)
+  ].join('');
+  return `<div class="tstats">${head}${rows}</div>`;
 }
 function closeModal(){document.getElementById('modal').classList.remove('open');}
 function tick(){ if(!DATA)return; document.querySelectorAll('.live-min').forEach(el=>{const m=DATA.matches[+el.dataset.mi];if(!m)return;el.textContent=liveLabel(m);}); }
